@@ -1,0 +1,11 @@
+node_modules/
+out/
+dist/
+*.log
+.DS_Store
+.env
+# icon 历史备份，不入库
+build/*.bak.*
+*.icns.bak.*
+# 临时渲染脚本（打包图标时产生）
+.tmp-*.js
