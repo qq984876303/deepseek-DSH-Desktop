@@ -1,12 +1,14 @@
-const { app, BrowserWindow, safeStorage, ipcMain } = require('electron');
+const { app, BrowserWindow, safeStorage, ipcMain, Menu, nativeTheme, dialog, shell } = require('electron');
 const path = require('path');
 const { spawn } = require('child_process');
 const fs = require('fs');
 const http = require('http');
 
 const HOST = '127.0.0.1';
+const REPO = 'qq984876303/deepseek-DSH-Desktop';
 let dshProc = null;
 let mainWindow = null;
+let setupWindow = null;
 
 function resolveDshBin() {
   try {
@@ -38,7 +40,35 @@ function writeApiKey(key) {
   fs.writeFileSync(apiKeyFile(), safeStorage.encryptString(key));
 }
 
-function spawnDsh(apiKey) {
+function clearApiKey() {
+  try {
+    fs.unlinkSync(apiKeyFile());
+  } catch {
+    /* ignore */
+  }
+}
+
+function settingsFile() {
+  return path.join(app.getPath('userData'), 'settings.json');
+}
+
+function defaultSettings() {
+  return { backend: 'deepseek', ollamaBaseUrl: 'http://localhost:11434/v1', ollamaModel: '', theme: 'system' };
+}
+
+function readSettings() {
+  try {
+    return Object.assign(defaultSettings(), JSON.parse(fs.readFileSync(settingsFile(), 'utf8')));
+  } catch {
+    return defaultSettings();
+  }
+}
+
+function writeSettings(s) {
+  fs.writeFileSync(settingsFile(), JSON.stringify(Object.assign(readSettings(), s), null, 2));
+}
+
+function spawnDsh(apiKey, settings) {
   const dshBin = resolveDshBin();
   const home = path.join(app.getPath('userData'), 'dsh-home');
   fs.mkdirSync(home, { recursive: true });
@@ -47,7 +77,15 @@ function spawnDsh(apiKey) {
     DSH_HOME: home,
     ELECTRON_RUN_AS_NODE: '1',
   });
-  if (apiKey) env.DEEPSEEK_API_KEY = apiKey;
+
+  if (settings.backend === 'ollama') {
+    // Ollama 暴露 OpenAI 兼容端点；把 DeepSeek provider 的 baseURL 指过去即可复用协议。
+    env.DEEPSEEK_BASE_URL = settings.ollamaBaseUrl || 'http://localhost:11434/v1';
+    // Ollama 不需要真实 key，但 dsh 凭证策略通常要求非空，给一个占位值。
+    env.DEEPSEEK_API_KEY = apiKey || 'sk-ollama-local';
+  } else if (apiKey) {
+    env.DEEPSEEK_API_KEY = apiKey;
+  }
 
   dshProc = spawn(
     process.execPath,
@@ -119,11 +157,12 @@ function showErrorWindow(msg) {
   w.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html));
 }
 
-function openSetupWindow() {
+// ---- Settings / setup window (first-run + reconfigure) ----
+function openSetupWindow(mode) {
   return new Promise((resolve, reject) => {
     const w = new BrowserWindow({
-      width: 480,
-      height: 340,
+      width: 540,
+      height: 500,
       resizable: false,
       show: false,
       autoHideMenuBar: true,
@@ -133,40 +172,60 @@ function openSetupWindow() {
         node: false,
       },
     });
+    setupWindow = w;
     w.once('ready-to-show', () => w.show());
     w.loadFile(path.join(__dirname, 'setup.html'));
-    ipcMain.once('setup:save-key', (_e, key) => {
+
+    let done = false;
+    const finish = (result) => {
+      if (done) return;
+      done = true;
+      setTimeout(() => {
+        try {
+          w.close();
+        } catch {
+          /* ignore */
+        }
+      }, 120);
+      resolve(result);
+    };
+
+    ipcMain.handleOnce('setup:initial', () => ({ hasKey: !!readApiKey(), settings: readSettings(), mode }));
+    ipcMain.handleOnce('setup:submit', async (_e, payload) => {
       try {
-        writeApiKey((key || '').trim());
-        w.close();
-        resolve((key || '').trim());
+        if (payload.clear) {
+          clearApiKey();
+        } else if (payload.key) {
+          writeApiKey(payload.key);
+        }
+        if (payload.settings) writeSettings(payload.settings);
+        const action = mode === 'firstrun' ? 'continue' : 'restart';
+        finish({ action });
+        return { action };
       } catch (err) {
-        reject(err);
+        return { action: 'error', error: String(err && err.message ? err.message : err) };
+      }
+    });
+    w.on('closed', () => {
+      ipcMain.removeHandler('setup:initial');
+      ipcMain.removeHandler('setup:submit');
+      if (!done) {
+        if (mode === 'firstrun') reject(new Error('setup window closed'));
+        else resolve({ action: 'cancel' });
       }
     });
   });
 }
 
-async function boot() {
-  let apiKey = readApiKey();
-  if (!apiKey) {
-    try {
-      apiKey = await openSetupWindow();
-    } catch (e) {
-      showErrorWindow(String(e && e.message ? e.message : e));
-      return;
-    }
+async function openSettings() {
+  const res = await openSetupWindow('reconfigure');
+  if (res.action === 'restart') {
+    app.relaunch();
+    app.quit();
   }
+}
 
-  let url;
-  try {
-    url = await spawnDsh(apiKey);
-    await waitForServer(url);
-  } catch (e) {
-    showErrorWindow(String(e && e.message ? e.message : e));
-    return;
-  }
-
+function createMainWindow(url) {
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 820,
@@ -182,9 +241,172 @@ async function boot() {
     if (failCount <= 5) setTimeout(() => mainWindow.loadURL(url), 600);
   });
   mainWindow.loadURL(url);
+  mainWindow.on('closed', () => {
+    mainWindow = null;
+  });
 }
 
-app.whenReady().then(boot);
+// ---- Menu / appearance / updates ----
+function showAbout() {
+  dialog
+    .showMessageBox({
+      type: 'info',
+      title: 'About DSH Desktop',
+      message: 'DSH Desktop ' + app.getVersion(),
+      detail:
+        'macOS desktop shell for DeepSeek Harness (dsh).\n\n' +
+        'Repository: https://github.com/' + REPO + '\n' +
+        'License: MIT\n\n' +
+        'Your API key is stored locally in the macOS Keychain and never leaves this machine.',
+      buttons: ['OK', 'Open Repository'],
+      defaultId: 0,
+      cancelId: 0,
+    })
+    .then((r) => {
+      if (r.response === 1) shell.openExternal('https://github.com/' + REPO);
+    });
+}
+
+function setTheme(theme) {
+  nativeTheme.themeSource = theme;
+  const s = readSettings();
+  s.theme = theme;
+  writeSettings(s);
+  buildAppMenu();
+}
+
+function buildAppMenu() {
+  const theme = nativeTheme.themeSource;
+  const template = [
+    {
+      label: 'DSH Desktop',
+      submenu: [
+        { label: 'About DSH Desktop', click: showAbout },
+        { type: 'separator' },
+        { label: 'Settings…', accelerator: 'Cmd+,', click: openSettings },
+        { type: 'separator' },
+        { role: 'services', submenu: [] },
+        { type: 'separator' },
+        { role: 'hide' },
+        { role: 'hideOthers' },
+        { role: 'unhide' },
+        { type: 'separator' },
+        { role: 'quit' },
+      ],
+    },
+    { role: 'editMenu' },
+    {
+      label: 'View',
+      submenu: [
+        { role: 'reload' },
+        { role: 'toggleDevTools' },
+        { type: 'separator' },
+        {
+          label: 'Appearance',
+          submenu: [
+            { label: 'System', type: 'radio', checked: theme === 'system', click: () => setTheme('system') },
+            { label: 'Dark', type: 'radio', checked: theme === 'dark', click: () => setTheme('dark') },
+            { label: 'Light', type: 'radio', checked: theme === 'light', click: () => setTheme('light') },
+          ],
+        },
+        { role: 'togglefullscreen' },
+      ],
+    },
+    { role: 'windowMenu' },
+    {
+      role: 'help',
+      submenu: [
+        { label: 'GitHub Repository', click: () => shell.openExternal('https://github.com/' + REPO) },
+        { label: 'Check for Updates…', click: checkForUpdates },
+      ],
+    },
+  ];
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+}
+
+function compareVersion(a, b) {
+  const pa = String(a).split('.').map((x) => parseInt(x, 10) || 0);
+  const pb = String(b).split('.').map((x) => parseInt(x, 10) || 0);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const x = pa[i] || 0;
+    const y = pb[i] || 0;
+    if (x > y) return 1;
+    if (x < y) return -1;
+  }
+  return 0;
+}
+
+async function checkForUpdates() {
+  const current = app.getVersion();
+  try {
+    const res = await fetch('https://api.github.com/repos/' + REPO + '/releases/latest', {
+      headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'dsh-desktop' },
+    });
+    if (!res.ok) throw new Error('GitHub API returned ' + res.status);
+    const data = await res.json();
+    const latest = String(data.tag_name || '').replace(/^v/, '');
+    if (!latest) throw new Error('no release tag found');
+    if (compareVersion(latest, current) > 0) {
+      const r = await dialog.showMessageBox({
+        type: 'info',
+        title: 'Update available',
+        message: 'Version ' + data.tag_name + ' is available (you have ' + current + ').',
+        detail: data.body ? String(data.body).slice(0, 600) : '',
+        buttons: ['Download', 'Later'],
+        defaultId: 0,
+        cancelId: 1,
+      });
+      if (r.response === 0) shell.openExternal(data.html_url);
+    } else {
+      dialog.showMessageBox({
+        type: 'info',
+        title: 'Up to date',
+        message: 'You are running the latest version (' + current + ').',
+      });
+    }
+  } catch (e) {
+    dialog.showMessageBox({
+      type: 'error',
+      title: 'Update check failed',
+      message: String(e && e.message ? e.message : e),
+    });
+  }
+}
+
+// ---- Boot ----
+async function boot() {
+  const settings = readSettings();
+  let apiKey = readApiKey();
+
+  if (settings.backend !== 'ollama' && !apiKey) {
+    try {
+      const res = await openSetupWindow('firstrun');
+      if (res.action !== 'continue') return;
+      apiKey = readApiKey();
+    } catch (e) {
+      showErrorWindow(String(e && e.message ? e.message : e));
+      return;
+    }
+  }
+
+  let url;
+  try {
+    url = await spawnDsh(apiKey, settings);
+    await waitForServer(url);
+  } catch (e) {
+    showErrorWindow(String(e && e.message ? e.message : e));
+    return;
+  }
+
+  createMainWindow(url);
+}
+
+app.whenReady().then(() => {
+  const s = readSettings();
+  nativeTheme.themeSource = s.theme || 'system';
+  buildAppMenu();
+  boot();
+});
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();

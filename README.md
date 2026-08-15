@@ -46,6 +46,37 @@ Electron 主进程会拉起已发布的 `@deepseek-ai/dsh` CLI（`dsh web`，通
 
 ---
 
+## Features · 功能特性
+
+- **Settings panel** — re-enter or clear the API key anytime from the app menu
+  (`DSH Desktop → Settings…`, or `⌘,`). No more deleting files by hand.
+- **Ollama local backend** — switch the model backend to Ollama and run models
+  entirely on your machine, no API key required. The shell points dsh's OpenAI-
+  compatible provider at `http://localhost:11434/v1`; pick the model name inside the
+  dsh Web UI.
+- **Native macOS menu** — application / edit / view / window / help menus, with
+  About, Settings, developer tools, and a direct link to the GitHub repo.
+- **Dark mode** — follows the system appearance by default, or force Dark / Light
+  from the View menu.
+- **Update check** — unsigned apps can't self-update via Sparkle, so the Help menu
+  checks the latest GitHub Release and opens the download page when a newer version
+  exists.
+
+## 功能特性
+
+- **设置面板** —— 随时从应用菜单（`DSH Desktop → 设置…`，或 `⌘,`）重新录入或清除
+  API key，不再需要手动删文件。
+- **Ollama 本地后端** —— 可将模型后端切换到 Ollama，在本机本地运行模型、无需 API key。
+  外壳会把 dsh 的 OpenAI 兼容 provider 指向 `http://localhost:11434/v1`；模型名在
+  dsh Web UI 内选择。
+- **原生 macOS 菜单** —— 应用 / 编辑 / 视图 / 窗口 / 帮助菜单，含关于、设置、开发者
+  工具，以及直达 GitHub 仓库的入口。
+- **深色模式** —— 默认跟随系统外观，也可在视图菜单中强制深色 / 浅色。
+- **更新检查** —— 未签名应用无法通过 Sparkle 自更新，因此帮助菜单会查询最新的 GitHub
+  Release，发现新版本时打开下载页。
+
+---
+
 ## Build from source · 本地重建 dmg
 
 ```sh

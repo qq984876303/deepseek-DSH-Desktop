@@ -1,72 +1,165 @@
 <!doctype html>
-<html lang="en">
+<html lang="zh">
   <head>
     <meta charset="utf-8" />
     <meta
       http-equiv="Content-Security-Policy"
       content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'"
     />
-    <title>DSH Desktop setup</title>
+    <title>DSH Desktop 设置</title>
     <style>
       html, body { margin: 0; height: 100%; }
       body {
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
         background: #1e1e1e;
         color: #e6e6e6;
-        display: flex;
-        align-items: center;
-        justify-content: center;
+        font-size: 13px;
       }
-      .card { width: 380px; padding: 24px; }
-      h1 { font-size: 16px; font-weight: 500; margin: 0 0 8px; }
-      p { font-size: 13px; color: #a6a6a6; margin: 0 0 18px; line-height: 1.5; }
-      label { font-size: 12px; color: #a6a6a6; display: block; margin-bottom: 6px; }
+      .wrap { padding: 22px 24px; }
+      h1 { font-size: 16px; font-weight: 500; margin: 0 0 4px; }
+      .sub { font-size: 12px; color: #8a8a8a; margin: 0 0 18px; }
+      .group { margin-bottom: 18px; }
+      .label { font-size: 12px; color: #a6a6a6; margin-bottom: 8px; display: block; }
+      .radios { display: flex; gap: 10px; }
+      .radio {
+        flex: 1; border: 1px solid #3a3a3a; border-radius: 8px; padding: 10px 12px;
+        cursor: pointer; background: #252525; transition: border-color .15s;
+      }
+      .radio.active { border-color: #7F77DD; background: #2c2740; }
+      .radio b { display: block; font-size: 13px; margin-bottom: 2px; }
+      .radio span { font-size: 11px; color: #8a8a8a; line-height: 1.4; }
       input {
-        width: 100%;
-        box-sizing: border-box;
-        padding: 8px 10px;
-        border-radius: 6px;
-        border: 1px solid #444;
-        background: #2a2a2a;
-        color: #e6e6e6;
-        font-size: 13px;
+        width: 100%; box-sizing: border-box; padding: 8px 10px; border-radius: 6px;
+        border: 1px solid #444; background: #2a2a2a; color: #e6e6e6; font-size: 13px;
       }
+      .hint { font-size: 11px; color: #8a8a8a; margin-top: 6px; line-height: 1.5; }
+      .section { display: none; }
+      .section.show { display: block; }
+      .row { display: flex; gap: 10px; align-items: center; }
       button {
-        margin-top: 14px;
-        width: 100%;
-        padding: 9px;
-        border: 0;
-        border-radius: 6px;
-        background: #7F77DD;
-        color: #fff;
-        font-size: 13px;
-        cursor: pointer;
+        margin-top: 6px; padding: 9px 14px; border: 0; border-radius: 6px;
+        background: #7F77DD; color: #fff; font-size: 13px; cursor: pointer;
       }
       button:hover { background: #6f66d0; }
+      button.ghost { background: transparent; border: 1px solid #555; color: #c9c9c9; }
+      button.ghost:hover { background: #2a2a2a; }
+      #status { font-size: 12px; margin-top: 12px; min-height: 16px; color: #9fd49f; }
+      #status.err { color: #e88; }
     </style>
   </head>
   <body>
-    <div class="card">
-      <h1>DSH Desktop</h1>
-      <p>
-        Enter your DeepSeek API key. It is encrypted with macOS Keychain and passed
-        to the local dsh runtime.
-      </p>
-      <label for="key">DeepSeek API key</label>
-      <input id="key" type="password" placeholder="sk-..." autocomplete="off" />
-      <button id="save">Save and start</button>
+    <div class="wrap">
+      <h1>DSH Desktop 设置</h1>
+      <p class="sub">Settings · API key 仅存于本机钥匙串，不会上传</p>
+
+      <div class="group">
+        <span class="label">模型后端 / Model backend</span>
+        <div class="radios" id="backend">
+          <div class="radio" data-v="deepseek">
+            <b>DeepSeek 云端</b>
+            <span>使用 DeepSeek API（需 key）</span>
+          </div>
+          <div class="radio" data-v="ollama">
+            <b>Ollama 本地</b>
+            <span>在本机运行模型，免 key</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="section" id="sec-deepseek">
+        <span class="label">DeepSeek API key</span>
+        <input id="key" type="password" placeholder="sk-..." autocomplete="off" />
+        <div class="hint" id="keyHint"></div>
+        <div class="row" style="margin-top:10px">
+          <button id="clear">清除 Key / Clear</button>
+        </div>
+      </div>
+
+      <div class="section" id="sec-ollama">
+        <span class="label">Ollama Base URL</span>
+        <input id="ollamaUrl" type="text" placeholder="http://localhost:11434/v1" />
+        <div class="hint">
+          Ollama 提供 OpenAI 兼容接口。若改过端口请相应调整。保存后，请在 DSH Web 的「模型选择」里填入你的 Ollama 模型名（如 llama3.1）。
+        </div>
+        <span class="label" style="margin-top:12px">默认模型 / Default model</span>
+        <input id="ollamaModel" type="text" placeholder="llama3.1（可选，也可在 Web 内选）" />
+      </div>
+
+      <div class="row" style="margin-top:18px">
+        <button id="save">保存 / Save</button>
+      </div>
+      <div id="status"></div>
     </div>
+
     <script>
-      const input = document.getElementById('key');
-      const btn = document.getElementById('save');
-      function submit() {
-        const v = (input.value || '').trim();
-        if (!v) { input.focus(); return; }
-        window.dshDesktop.saveKey(v);
+      const $ = (id) => document.getElementById(id);
+      let initial = { hasKey: false, settings: { backend: 'deepseek', ollamaBaseUrl: 'http://localhost:11434/v1', ollamaModel: '' }, mode: 'firstrun' };
+
+      function setBackend(v) {
+        document.querySelectorAll('#backend .radio').forEach((el) => {
+          el.classList.toggle('active', el.dataset.v === v);
+        });
+        $('sec-deepseek').classList.toggle('show', v === 'deepseek');
+        $('sec-ollama').classList.toggle('show', v === 'ollama');
       }
-      btn.addEventListener('click', submit);
-      input.addEventListener('keydown', (e) => { if (e.key === 'Enter') submit(); });
-      input.focus();
+
+      function status(msg, err) {
+        const s = $('status');
+        s.textContent = msg;
+        s.classList.toggle('err', !!err);
+      }
+
+      async function save() {
+        const backend = document.querySelector('#backend .radio.active').dataset.v;
+        const settings = {
+          backend,
+          ollamaBaseUrl: $('ollamaUrl').value.trim() || 'http://localhost:11434/v1',
+          ollamaModel: $('ollamaModel').value.trim(),
+          theme: initial.settings.theme || 'system',
+        };
+        const key = $('key').value.trim();
+        if (backend === 'deepseek' && !key && !initial.hasKey) {
+          status('请填写 DeepSeek API key，或切换到 Ollama 本地。', true);
+          return;
+        }
+        const res = await window.dshDesktop.submit({ key, clear: false, settings });
+        if (res.action === 'error') {
+          status('保存失败: ' + (res.error || ''), true);
+        } else if (res.action === 'restart') {
+          status('已保存，应用将重启…');
+        } else {
+          status('已保存，正在启动…');
+        }
+      }
+
+      async function clearKey() {
+        const settings = {
+          backend: document.querySelector('#backend .radio.active').dataset.v,
+          ollamaBaseUrl: $('ollamaUrl').value.trim() || 'http://localhost:11434/v1',
+          ollamaModel: $('ollamaModel').value.trim(),
+          theme: initial.settings.theme || 'system',
+        };
+        const res = await window.dshDesktop.submit({ key: '', clear: true, settings });
+        if (res.action === 'error') status('清除失败: ' + (res.error || ''), true);
+        else status('Key 已清除，应用将重启…');
+      }
+
+      (async () => {
+        initial = await window.dshDesktop.getInitial();
+        const s = initial.settings;
+        setBackend(s.backend || 'deepseek');
+        $('ollamaUrl').value = s.ollamaBaseUrl || 'http://localhost:11434/v1';
+        $('ollamaModel').value = s.ollamaModel || '';
+        if (initial.hasKey) {
+          $('keyHint').textContent = '已保存 key（留空则保持不变；点「清除」可删除）。';
+        } else {
+          $('keyHint').textContent = '首次使用请填写你的 DeepSeek API key。';
+        }
+        $('save').addEventListener('click', save);
+        $('clear').addEventListener('click', clearKey);
+        $('key').addEventListener('keydown', (e) => { if (e.key === 'Enter') save(); });
+        $('key').focus();
+      })();
     </script>
   </body>
 </html>

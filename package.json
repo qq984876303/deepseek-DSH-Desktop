@@ -1,9 +1,14 @@
 {
   "name": "dsh-desktop",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "macOS desktop shell for DeepSeek Harness (dsh)",
   "private": true,
   "license": "MIT",
+  "author": "qq984876303",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/qq984876303/deepseek-DSH-Desktop.git"
+  },
   "main": "src/main.js",
   "scripts": {
     "start": "electron .",
